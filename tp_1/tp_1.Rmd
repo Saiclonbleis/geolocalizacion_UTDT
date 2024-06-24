@@ -1,0 +1,237 @@
+---
+title: "Trabajo practico 1"
+author: "Marco Curcio"
+date: '2024'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#seteo el directorio en el que voy a trabajar
+setwd("C:/Users/curci/OneDrive/Escritorio/Tesis/Bibliografia_Tesis/tp_1")
+```
+
+```{r}
+#cargo las librerias
+library(tidyverse)
+library(ggmap)
+library(sf)
+library(osmdata)
+```
+
+```{r}
+#cargo los datasets
+#archivo shapefile de los Centros de Salud y Acción Comunitaria (CESAC)
+cesac <- read_sf("datasets/cesac/centros_de_salud_nivel_1_BADATA_WGS84.shp",#ruta del archivo
+                 #convierte los caracteres a factores, es para que sea leido como datos categoricos
+                 stringsAsFactors = TRUE,
+                 #cambia la codificación del archivo para que no aparezcan caracteres extraños
+                 options = "ENCODING=latin1")
+
+#archivo shapefile de los radios censales de CABA
+radios_censales <- read_sf("datasets/radio_censal/informacion_censal_por_radio_2010_wgs84.shp",
+                           stringsAsFactors = TRUE,
+                    options = "ENCODING=latin1")
+```
+
+reviso cantidad de filas, columnas y resumen de ambos archivos
+
+```{r}
+head(cesac) #veo el encabezado
+dim(cesac) #veo la cantidad de filas y columnas
+summary(cesac) #resumen de las columnas
+
+head(radios_censales)
+dim(radios_censales)
+summary(radios_censales)
+```
+
+el archivo con los CESAC muestra información de los 45 centros de salud y contiene información variada, como por ejemplo: Telefono,región, especialidad, dirección e información geografica, entre otros. Mientras que el archivo de radios censales muestra información geografica y datos poblacionales, como la cantidad de hombres y mujeres por división geografica.
+
+```{r}
+#obtengo el bounding box de CABA, esto es para indicar los limites del mapa que voy a querer descargar
+#a continuación
+bbox_caba <- getbb("Buenos Aires, Ciudad Autonoma de Buenos Aires, Argentina")
+#descargo el mapa con la función get_stadiamap, la API key ya está cargada en R
+mapa_caba <- get_stadiamap(bbox = bbox_caba, #indica los limites del mapa a descargar
+                              #indica el estilo de mapa a descargar
+                              maptype = "stamen_toner_lite", 
+                              #indica el zoom del mapa a descargar
+                              zoom = 12) 
+
+#hago un mapa mostrando los CESAC en el mapa base descargado previamente
+#con ggmap grafico el mapa base, en este caso el que descargue previamente
+ggmap(mapa_caba) +
+#con geom_sf agrego una capa mas al mapa, en este caso las ubicaciones marcadas en el dataset del cesac
+  geom_sf(data = cesac,
+#elijo un color
+          color = "#FEE900",
+          inherit.aes = FALSE) +
+#agrego un label con el titulo, ubicación, fuente y datos mios
+  labs(title = "Ubicación CESAC",
+       subtitle = "CABA",
+       caption = "Fuente: BA data \nAutor: Marco Curcio")+
+#pequeñas modificaciones en el tema, saco los nombres y las coordenadas porque no me gusta como queda  
+  theme(axis.title = element_blank(),
+        axis.text = element_blank()) 
+```
+
+```{r}
+#calculo las areas de influencia de 1Km alrededor de cada CESAC
+#se hace con la función st_buffer
+buffer_cesac <- st_buffer(cesac, #indico los datos que voy a utilizar
+                          1000)  #area de influencia, se mide en metros
+
+#lo grafico
+#es similar a lo anterior
+ggmap(mapa_caba) +
+  geom_sf(data = cesac,
+          color = "#FEE900",
+          inherit.aes = FALSE) +
+#agrego un geom_sf con los buffer, el alpha controla la transparencia de las areas y con fill cambio el color,
+#Pantone dice que el complementario de ese amarillo es azul asi que boquita sera
+  geom_sf(data = buffer_cesac,
+          alpha = 0.15,
+          fill = "#0015fe",
+          inherit.aes = FALSE) +
+  labs(title = "CESAC - Influencia 1 Km",
+       subtitle = "CABA",
+       caption = "Fuente: BA data \nAutor: Marco Curcio")+
+  theme(axis.text = element_blank(),
+                axis.title = element_blank())
+```
+
+Como hay muchas areas de influencia que se solapan, lo mejor es unificar los poligonos
+
+```{r}
+buffer_cesac <- buffer_cesac %>%
+  summarise(geometry = st_union(geometry))
+
+ggmap(mapa_caba) +
+  geom_sf(data = cesac,
+          color = "#FEE900",
+          inherit.aes = FALSE) +
+  geom_sf(data = buffer_cesac,
+          alpha = 0.15,
+          fill = "#0015fe",
+          inherit.aes = FALSE) +
+  labs(title = "CESAC - Influencia 1 Km",
+       subtitle = "CABA",
+       caption = "Fuente: BA data \nAutor: Marco Curcio")+
+  theme(axis.text = element_blank(),
+                axis.title = element_blank())
+#agora sim
+```
+
+Hora de cruzar las areas de influencia con los radios censales y ver los que se solapan
+
+```{r}
+#esta linea de codigo es para hacer que la geometria sea valida, ya que sin esto no me permite hacer graficar correctamente el mapa
+buffer_cesac <- buffer_cesac %>%
+  st_make_valid()
+#con esta función creo una intersección entre los radios censales y los buffer, de esta manera queda marcado
+#solo los lugares que estan en el area de influencia de los CESAC
+radios_censales_cesac <- st_intersection(radios_censales, buffer_cesac)
+#el mapa es similar al anterior, solo que ahora estan marcadas solo las areas que tienen un CESAC cerca
+ggmap(mapa_caba) +
+  geom_sf(data = cesac %>%
+          st_transform(4326),
+          color = "#FEE900",
+          inherit.aes = FALSE) +
+  geom_sf(data = radios_censales_cesac %>% 
+          st_transform(4326),
+          alpha = 0.15,
+          fill = "#0015fe",
+          inherit.aes = FALSE) +
+  labs(title = "CESAC - Influencia 1 Km",
+       subtitle = "CABA",
+       caption = "Fuente: BA data \nAutor: Marco Curcio")+
+  theme(axis.text = element_blank(),
+                axis.title = element_blank())
+```
+
+Ahora toca usar funciones para responder las siguientes preguntas : - cuantos hogares (T_HOGAR) viven a menos de 1km de cada CESAC - Indicar cuál es el CESAC que tiene la mayor cantidad de hogares a menos de 1 km y cuál es el que tiene la menor.
+
+```{r}
+radios_censales_cesac %>%
+  st_drop_geometry() %>%
+  summarise(
+          Total_hogar = sum(T_HOGAR))
+#570295 hogares se encuentran a menos de 1 Km de un CESAC
+
+#hago una interseccion nueva sin unificar las geometrias asi puede calcular individualmente el area de influencia
+buffer_cesac_top <- st_buffer(cesac, 
+                          1000)
+#hago la interseccion
+top_cesac <- st_intersection(radios_censales, buffer_cesac_top)
+#agrupo por CESAC y calculo el total de hogares en cada area de influencia.
+#Por alguna razon la columna geometry estaba teniendo problemas asi que la dropeo para hacer el group_by
+#y la vuelvo a joinear para cuando tenga que graficar
+top_cesac <- top_cesac %>%
+  st_make_valid() %>%
+  group_by(nombre) %>%
+  summarise(total = sum(T_HOGAR)) 
+#con slice_max puedo ver el CESAC con mayor cantidad de hogares, uso el comando n = 1 para ver solo el primer caso
+slice_max(top_cesac, 
+          total, 
+          n= 1)
+#hago lo mismo solo que uso slice_min para ver el menor
+slice_min(top_cesac, 
+          total, 
+          n= 1)
+```
+hago un mapa donde el tamaño del punto del CESAC aumenta en relación a la cantidad de hogares alcanzados
+```{r}
+ggmap(mapa_caba) +
+    geom_sf(data = radios_censales %>% 
+          st_transform(4326),
+          inherit.aes = FALSE) +
+  geom_sf(data = top_cesac %>%
+          st_transform(4326),
+          color = "#FEE900",
+          aes(size = total),
+          inherit.aes = FALSE) +
+  labs(title = "CESAC - Influencia 1 Km",
+       subtitle = "CABA",
+       caption = "Fuente: BA data \nAutor: Marco Curcio")+
+  theme(axis.text = element_blank(),
+                axis.title = element_blank())
+```
+```{r}
+#ahora toca descargar informacion extra usando OSM
+#primero construyo una overpass query a partir del bbox de CABA
+bbox_caba <- getbb("Ciudad autonoma de Buenos Aires,Ciudad Autonoma de Buenos Aires, Argentina")
+osm_caba <- opq(bbox_caba) %>%
+#agrego los features que quiero graficar, en este caso farmacias
+  add_osm_feature(key = "amenity",
+                  value = c("pharmacy")) %>%
+#creo el mapa
+  osmdata_sf()
+#guardo las geometrias que me interesan
+farmacias_poligonos <- osm_caba$osm_polygons
+farmacias_multipoligonos <- osm_caba$osm_multipolygons
+#dejamos solo las farmacias que estan en las areas de influencia de los cesac
+farmacias_caba <- st_filter(farmacias_poligonos, radios_censales_cesac)
+```
+
+```{r}
+#hago el grafico
+ggmap(mapa_caba) +
+      geom_sf(data = farmacias_caba,
+          inherit.aes = FALSE,
+          color = "green") +
+  geom_sf(data = cesac,
+          fill = NA, 
+          color = "#0077b6", 
+          lwd = 0.75, 
+          inherit.aes = FALSE) +
+    geom_sf(data = radios_censales_cesac %>% 
+          st_transform(4326),
+          alpha = 0.1,
+          fill = "#0015fe",
+          inherit.aes = FALSE) +
+  labs(title = "Farmacias cercanas a CESAC",
+       subtitle = "Ciudad Autonoma de Buenos Aires",
+       caption = "Fuente: OpenStreetMap") +
+  theme_void()
+```
+
